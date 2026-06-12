@@ -84,34 +84,51 @@ function issueKanbanCol(issue) {
 }
 
 // ─── SAVED VIEWS ──────────────────────────────────────────
-const VIEWS_KEY = 'sommaire_views_v1';
+// ─── VIEWS (serveur, sync tous appareils) ────────────────────
+let _views = {}; // cache in-memory { module: [{id, name, state, isDefault}] }
 
-function getViews(module) {
-  try { return JSON.parse(localStorage.getItem(VIEWS_KEY) || '{}')[module] || []; }
-  catch { return []; }
+async function loadViewsFromServer() {
+  try {
+    const rows = await fetch('/api/views').then(r => r.json());
+    _views = {};
+    for (const r of rows) {
+      if (!_views[r.module]) _views[r.module] = [];
+      _views[r.module].push({ id: r.id, name: r.name, state: r.state, isDefault: !!r.is_default });
+    }
+    // Migration unique depuis localStorage
+    const legacy = localStorage.getItem('sommaire_views_v1');
+    if (legacy) {
+      const old = JSON.parse(legacy);
+      for (const [mod, views] of Object.entries(old)) {
+        for (const v of (views || [])) {
+          await fetch('/api/views', { method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ module: mod, name: v.name, state: v.state, is_default: v.isDefault ? 1 : 0 }) });
+        }
+      }
+      localStorage.removeItem('sommaire_views_v1');
+      await loadViewsFromServer(); // rechargement après migration
+    }
+  } catch {}
 }
-function saveView(module, name, state) {
-  const all = JSON.parse(localStorage.getItem(VIEWS_KEY) || '{}');
-  if (!all[module]) all[module] = [];
-  const idx = all[module].findIndex(v => v.name === name);
-  if (idx >= 0) all[module][idx] = { name, state };
-  else all[module].push({ name, state });
-  localStorage.setItem(VIEWS_KEY, JSON.stringify(all));
+function getViews(module) { return _views[module] || []; }
+function findDefaultView(module) { return getViews(module).find(v => v.isDefault) || null; }
+
+async function saveView(module, name, state) {
+  await fetch('/api/views', { method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ module, name, state, is_default: 0 }) });
+  await loadViewsFromServer();
 }
-function deleteView(module, name) {
-  const all = JSON.parse(localStorage.getItem(VIEWS_KEY) || '{}');
-  if (all[module]) all[module] = all[module].filter(v => v.name !== name);
-  localStorage.setItem(VIEWS_KEY, JSON.stringify(all));
+async function deleteView(module, name) {
+  const view = getViews(module).find(v => v.name === name);
+  if (view?.id) await fetch(`/api/views/${view.id}`, { method:'DELETE' });
+  await loadViewsFromServer();
 }
-function findDefaultView(module) {
-  return getViews(module).find(v => v.isDefault) || null;
-}
-function toggleDefaultView(module, name) {
-  const all = JSON.parse(localStorage.getItem(VIEWS_KEY) || '{}');
-  if (!all[module]) return;
-  const wasDefault = all[module].find(v => v.name === name)?.isDefault || false;
-  all[module] = all[module].map(v => ({ ...v, isDefault: v.name === name ? !wasDefault : false }));
-  localStorage.setItem(VIEWS_KEY, JSON.stringify(all));
+async function toggleDefaultView(module, name) {
+  const view = getViews(module).find(v => v.name === name);
+  if (!view?.id) return;
+  await fetch(`/api/views/${view.id}`, { method:'PATCH', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ is_default: view.isDefault ? 0 : 1 }) });
+  await loadViewsFromServer();
 }
 function renderViewsDropdown(module, getState, applyState) {
   document.querySelectorAll(`.views-btn-wrap[data-module="${module}"]`).forEach(wrap => {
@@ -137,9 +154,9 @@ function renderViewsDropdown(module, getState, applyState) {
       menu.style.display = open ? 'none' : 'block';
     });
     wrap.querySelectorAll('.views-star').forEach(btn => {
-      btn.addEventListener('click', e => {
+      btn.addEventListener('click', async e => {
         e.stopPropagation();
-        toggleDefaultView(module, btn.dataset.vn);
+        await toggleDefaultView(module, btn.dataset.vn);
         renderViewsDropdown(module, getState, applyState);
       });
     });
@@ -151,18 +168,18 @@ function renderViewsDropdown(module, getState, applyState) {
       });
     });
     wrap.querySelectorAll('.views-del').forEach(btn => {
-      btn.addEventListener('click', e => {
+      btn.addEventListener('click', async e => {
         e.stopPropagation();
-        deleteView(module, btn.dataset.vn);
+        await deleteView(module, btn.dataset.vn);
         renderViewsDropdown(module, getState, applyState);
         menu.style.display = 'none';
       });
     });
-    wrap.querySelector('.views-save').addEventListener('click', e => {
+    wrap.querySelector('.views-save').addEventListener('click', async e => {
       e.stopPropagation();
       const name = prompt('Nom de la vue :');
       if (!name?.trim()) return;
-      saveView(module, name.trim(), getState());
+      await saveView(module, name.trim(), getState());
       renderViewsDropdown(module, getState, applyState);
       menu.style.display = 'none';
     });
@@ -175,6 +192,7 @@ document.addEventListener('click', () => {
 // ─── BOOT ────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   cfg = await fetch('/api/config').then(r => r.json());
+  await loadViewsFromServer();
   await refreshIssues();
   await loadStatsBar();
   await loadDashboard();

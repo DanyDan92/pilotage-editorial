@@ -575,6 +575,44 @@ app.get('/api/export/cdf', async (req, res) => {
   res.end();
 });
 
+// ─── VIEWS ───────────────────────────────────────────────────
+db.exec(`CREATE TABLE IF NOT EXISTS views (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  module TEXT NOT NULL,
+  name TEXT NOT NULL,
+  state TEXT NOT NULL,
+  is_default INTEGER DEFAULT 0,
+  UNIQUE(module, name)
+)`);
+
+app.get('/api/views', (req, res) => {
+  res.json(db.prepare('SELECT * FROM views ORDER BY module, name').all()
+    .map(r => ({ ...r, state: JSON.parse(r.state) })));
+});
+app.post('/api/views', (req, res) => {
+  const { module, name, state, is_default } = req.body;
+  if (!module || !name || !state) return res.status(400).json({ error: 'missing fields' });
+  db.prepare(`INSERT INTO views (module,name,state,is_default) VALUES (?,?,?,?)
+    ON CONFLICT(module,name) DO UPDATE SET state=excluded.state, is_default=excluded.is_default`)
+    .run(module, name, JSON.stringify(state), is_default ? 1 : 0);
+  res.json({ ok: true });
+});
+app.patch('/api/views/:id', (req, res) => {
+  const view = db.prepare('SELECT * FROM views WHERE id=?').get(req.params.id);
+  if (!view) return res.status(404).json({ error: 'not found' });
+  const { is_default, state } = req.body;
+  if (is_default !== undefined) {
+    if (is_default) db.prepare('UPDATE views SET is_default=0 WHERE module=?').run(view.module);
+    db.prepare('UPDATE views SET is_default=? WHERE id=?').run(is_default ? 1 : 0, req.params.id);
+  }
+  if (state !== undefined) db.prepare('UPDATE views SET state=? WHERE id=?').run(JSON.stringify(state), req.params.id);
+  res.json({ ok: true });
+});
+app.delete('/api/views/:id', (req, res) => {
+  db.prepare('DELETE FROM views WHERE id=?').run(req.params.id);
+  res.json({ ok: true });
+});
+
 // ─── FACTURATION ─────────────────────────────────────────────
 const PRICING = { '32P': 400, '48P': 650, '64P': 750, '80P': 800, '96P': 900, '144P': 1500 };
 const SOMMAIRE_FEE = 70;
