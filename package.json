@@ -1,7 +1,7 @@
 {
-  "name": "sommaire-dckay",
+  "name": "presspilot",
   "version": "1.0.0",
-  "description": "Gestionnaire de sommaires et articles presse",
+  "description": "PressPilot — Pilotage éditorial DCKAY Agency",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

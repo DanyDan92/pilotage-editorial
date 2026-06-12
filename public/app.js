@@ -1,4 +1,4 @@
-/* Sommaire DCKAY — app.js */
+/* PressPilot — DCKAY Agency — app.js */
 'use strict';
 
 // ─── STATE ────────────────────────────────────────────────

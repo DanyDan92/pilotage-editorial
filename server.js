@@ -47,7 +47,7 @@ function basicAuth(req, res, next) {
     const pass = sep >= 0 ? decoded.slice(sep + 1) : decoded;
     if (user === APP_USERNAME && pass === APP_PASSWORD) return next();
   }
-  res.set('WWW-Authenticate', 'Basic realm="DCKAY Sommaire", charset="UTF-8"');
+  res.set('WWW-Authenticate', 'Basic realm="PressPilot", charset="UTF-8"');
   res.status(401).send('Authentification requise');
 }
 
@@ -478,7 +478,7 @@ app.get('/api/export/cdf', async (req, res) => {
   const sortedGroups = [...groupMap.values()].sort((a, b) => a.debut - b.debut);
 
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'DCKAY Agency — Sommaire';
+  workbook.creator = 'DCKAY Agency — PressPilot';
   const sheet = workbook.addWorksheet(`${magazine} N°${numero}`, {
     pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1 }
   });
@@ -775,4 +775,4 @@ app.post('/api/admin/import', (req, res) => {
   }
 });
 
-app.listen(PORT, () => console.log(`Pilotage Editorial → http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`PressPilot → http://localhost:${PORT}`));
