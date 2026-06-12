@@ -22,8 +22,6 @@ const app  = express();
 const PORT = process.env.PORT || 3737;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'sommaire.db');
 
-const NOTION_TOKEN   = process.env.NOTION_API_KEY;
-const ARTICLES_DB_ID = '353de84b-6874-80ba-8335-ed8e7e6ab0f2';
 const APP_USERNAME   = process.env.SOMMAIRE_USERNAME || 'dckay';
 const APP_PASSWORD   = process.env.SOMMAIRE_PASSWORD;
 
@@ -576,129 +574,6 @@ app.get('/api/export/cdf', async (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="CDF-${magazine.replace(/[^a-z0-9]/gi,'_')}-N${numero}.xlsx"`);
   await workbook.xlsx.write(res);
   res.end();
-});
-
-// ─── NOTION SYNC ─────────────────────────────────────────────
-const NOTION_NUMEROS = {
-  '366de84b-6874-8168-85c2-e3c947d308ec': { magazine: 'France hebdomadaire',       numero: '20',      deadline: '2026-06-10' },
-  '359de84b-6874-8083-8f97-f4545c0b1974': { magazine: 'Spéciale Dernière',          numero: '19',      deadline: '2026-05-14' },
-  '36bde84b-6874-80bd-92df-fa05ad266327': { magazine: 'Crimes Magazines',           numero: '58',      deadline: '2026-06-13' },
-  '366de84b-6874-8146-9b9c-fd18846fde91': { magazine: "C'Est Dit",                  numero: '51',      deadline: '2026-06-24' },
-  '366de84b-6874-81ab-ac0d-c6d7fd4aee86': { magazine: 'Intimite',                   numero: '48',      deadline: '2026-06-08' },
-  '366de84b-6874-81c8-9629-d7864d181bf3': { magazine: 'Cote France',                numero: '57',      deadline: '2026-06-03' },
-  '359de84b-6874-8065-bf1b-e5367f4799d3': { magazine: 'Spécial Police',             numero: 'Spécial', deadline: '2026-05-21' },
-  '366de84b-6874-8106-81a8-dde626112ec9': { magazine: 'Journal De France',          numero: '112',     deadline: '2026-06-01' },
-  '359de84b-6874-80c5-bd3b-dcd9dcd3d594': { magazine: 'Ouah',                       numero: '—',       deadline: '2026-05-17' },
-  '366de84b-6874-812a-9e74-cd284f926a9b': { magazine: 'Cote France',                numero: '58',      deadline: '2026-06-17' },
-  '359de84b-6874-80f9-808e-c71aac017930': { magazine: 'Royauté',                    numero: '—',       deadline: '2026-05-26' },
-  '366de84b-6874-8179-801b-f687c8fe302f': { magazine: 'Oula',                       numero: '71',      deadline: '2026-06-24' },
-  '366de84b-6874-81ac-9629-edb6f959e69e': { magazine: 'Choc',                       numero: '218',     deadline: '2026-06-29' },
-  '366de84b-6874-81c2-b313-defa7703c73d': { magazine: 'Coté France Destins Brisés', numero: '22',      deadline: '2026-06-24' },
-  '366de84b-6874-8141-9ee3-dd5d722d7286': { magazine: 'Paris Hebdo',                numero: '37',      deadline: '2026-07-01' },
-  '366de84b-6874-81ae-ade2-f59ddfc383e4': { magazine: 'Royal Life',                 numero: '33',      deadline: '2026-06-25' },
-  '366de84b-6874-8127-90d8-d7d6077a53c6': { magazine: 'Scenes de Crimes',           numero: '16',      deadline: '2026-07-01' },
-  '359de84b-6874-802a-875e-c229b6e9759d': { magazine: 'Souvenir Souvenir',          numero: '40',      deadline: '2026-05-10' },
-  '366de84b-6874-81e2-bc47-fdb7bdeea762': { magazine: 'Stop Arnaques',              numero: '157',     deadline: '2026-06-10' },
-  '359de84b-6874-80e3-b03d-f9cb622eb6b7': { magazine: 'Intimité Dimanche',          numero: '32',      deadline: '2026-05-07' },
-  '366de84b-6874-8118-a3c6-f6676d24bd52': { magazine: 'Enquetes Magazine',          numero: '26',      deadline: '2026-06-03' },
-};
-
-app.post('/api/sync-notion', async (req, res) => {
-  try {
-    const txt = p => (p?.rich_text || p?.title || []).map(r => r.plain_text).join('') || null;
-    const sel = p => p?.select?.name || null;
-    const num = p => p?.number ?? null;
-    const url = p => p?.url || null;
-    const sts = p => p?.status?.name || null;
-    const insert = db.prepare(`INSERT INTO articles (magazine, numero, titre, type_contenu, rubrique,
-      page_debut, page_fin, status, auteur, resume, lien_article, article_source,
-      validation, commentaires, signes, deadline) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`);
-    db.prepare('DELETE FROM articles').run();
-    let cursor, total = 0;
-    do {
-      const body = { page_size: 100 };
-      if (cursor) body.start_cursor = cursor;
-      const r = await fetch(`https://api.notion.com/v1/databases/${ARTICLES_DB_ID}/query`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${NOTION_TOKEN}`, 'Notion-Version': '2022-06-28', 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!r.ok) throw new Error(`Notion ${r.status}`);
-      const data = await r.json();
-      for (const page of data.results) {
-        const p = page.properties;
-        const relations = p['Numéro Lié']?.relation || [];
-        const numInfo = relations.length ? NOTION_NUMEROS[relations[0].id] : null;
-        const auteurPeople = p['Auteur']?.people || [];
-        insert.run(numInfo?.magazine||'', numInfo?.numero||'', txt(p['Titre / Sujet'])||'(sans titre)',
-          sel(p['Type de contenu']), sel(p['Rubrique']), num(p['Page Début']), num(p['Page Fin']),
-          sts(p['Status'])||'A faire', auteurPeople.length ? auteurPeople[0].name : null,
-          txt(p['Résumé / Angles']), url(p['Lien Article']), url(p['Article source']),
-          sel(p['Validation'])||'A valider', txt(p['Commentaires']), num(p['Signes']),
-          numInfo?.deadline||null);
-        total++;
-      }
-      cursor = data.has_more ? data.next_cursor : undefined;
-    } while (cursor);
-    res.json({ ok: true, total });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// ─── NOTION SYNC — ISSUES ─────────────────────────────────────
-const STATUT_NUM_MAP = {
-  'Sommaire à créer': 'En préparation',
-  'Non démarré':      'En préparation',
-  'A faire':          'En préparation',
-  'Rédaction':        'En cours de rédaction',
-  'En cours':         'En cours de rédaction',
-  'Bouclage':         'Bouclé',
-  'Bouclé':           'Bouclé',
-  'Terminé':          'Publié',
-  'Publié':           'Publié',
-  'Paru':             'Publié',
-};
-
-app.post('/api/sync-issues-notion', async (req, res) => {
-  try {
-    const headers = { Authorization: `Bearer ${NOTION_TOKEN}`, 'Notion-Version': '2022-06-28' };
-    let updated = 0;
-    for (const [pageId, info] of Object.entries(NOTION_NUMEROS)) {
-      const r = await fetch(`https://api.notion.com/v1/pages/${pageId}`, { headers });
-      if (!r.ok) continue;
-      const data = await r.json();
-      const p = data.properties;
-
-      const selOrSts = f => p[f]?.select?.name || p[f]?.status?.name || null;
-      const dateVal  = f => p[f]?.date?.start || null;
-      const txtVal   = f => (p[f]?.rich_text || p[f]?.title || []).map(r => r.plain_text).join('') || null;
-      const urlVal   = f => p[f]?.url || null;
-
-      const typeMag      = selOrSts('Magazine');
-      const fmtRaw       = selOrSts('Format pages');
-      const formatPage   = fmtRaw ? (fmtRaw.endsWith('P') ? fmtRaw : fmtRaw + 'P') : null;
-      const statGlobal   = selOrSts('Status global');
-      const statutNumero = STATUT_NUM_MAP[statGlobal] || statGlobal || null;
-      const statutPay    = selOrSts('Payment Status');
-      const lancement    = dateVal('Date de lancement');
-      const dlRedac      = dateVal('Deadline rédaction');
-      const bouclage     = dateVal('Date bouclage');
-      const lienDossier  = urlVal('Lien Dossier');
-      const note         = txtVal('Notes');
-
-      const existing = db.prepare('SELECT id FROM issues WHERE magazine=? AND numero=?').get(info.magazine, info.numero);
-      if (existing) {
-        db.prepare(`UPDATE issues SET type_magazine=?, format_page=?, statut_numero=?, statut_paiement=?,
-          date_lancement=?, deadline_redaction=?, deadline=?, lien_dossier=?, note=? WHERE id=?`)
-          .run(typeMag, formatPage, statutNumero, statutPay, lancement, dlRedac, bouclage, lienDossier, note, existing.id);
-      } else {
-        db.prepare(`INSERT OR IGNORE INTO issues (magazine, numero, deadline, date_lancement, deadline_redaction,
-          statut_numero, statut_paiement, format_page, note, lien_dossier, type_magazine) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
-          .run(info.magazine, info.numero, bouclage, lancement, dlRedac, statutNumero, statutPay, formatPage, note, lienDossier, typeMag);
-      }
-      updated++;
-    }
-    res.json({ ok: true, updated });
-  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── FACTURATION ─────────────────────────────────────────────
