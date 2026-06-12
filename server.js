@@ -21,7 +21,7 @@ if (fs.existsSync(envPath)) {
 
 const app  = express();
 const PORT = process.env.PORT || 3737;
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'sommaire.db');
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'data', 'presspilot.db');
 
 const APP_USERNAME   = process.env.SOMMAIRE_USERNAME || 'dckay';
 const APP_PASSWORD   = process.env.SOMMAIRE_PASSWORD;
