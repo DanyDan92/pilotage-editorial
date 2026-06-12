@@ -786,7 +786,7 @@ app.delete('/api/billing/payments/:id', (req, res) => {
 });
 
 // ─── ADMIN : MIGRATION DB ────────────────────────────────────
-const MIGRATION_TABLES = ['articles','issues','config_values','billing_months','billing_lines','billing_payments'];
+const MIGRATION_TABLES = ['articles','issues','config_values','billing_months','billing_lines','billing_payments','views'];
 
 app.get('/api/admin/export', (req, res) => {
   const data = {};
