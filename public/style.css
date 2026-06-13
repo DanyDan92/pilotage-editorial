@@ -159,10 +159,10 @@ span.editable.editable-wrap { white-space: normal; text-overflow: clip; overflow
 .cell-select:focus { background: var(--accent-light); border-radius: 3px; }
 
 td.col-source-cell { cursor: default; }
-.source-link { color: var(--accent); text-decoration: none; font-size: 11px; font-weight: 500; }
-.source-link:hover { text-decoration: underline; }
-.source-empty { color: #C8C0B6; font-size: 11px; font-style: italic; }
-.source-input { width: 100%; border: 1px solid var(--accent); border-radius: 4px; padding: 2px 5px; font-size: 11px; outline: none; background: var(--accent-light); font-family: var(--sans); }
+.source-cell-wrap { display: flex; align-items: center; gap: 4px; width: 100%; }
+.source-open { font-size: 13px; text-decoration: none; flex-shrink: 0; opacity: .55; line-height: 1; }
+.source-open:hover { opacity: 1; }
+.source-input { flex: 1; min-width: 0; border: 1px solid var(--accent); border-radius: 4px; padding: 2px 5px; font-size: 11px; outline: none; background: var(--accent-light); font-family: var(--sans); }
 
 .actions { display: flex; gap: 3px; justify-content: center; }
 .btn-icon { border: none; background: none; cursor: pointer; padding: 2px 5px; border-radius: 4px; font-size: 13px; opacity: .35; transition: opacity .15s, background .15s; }

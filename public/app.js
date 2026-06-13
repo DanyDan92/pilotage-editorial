@@ -618,12 +618,21 @@ function renderArticlesTable(articles) {
 
 function renderSourceCell(a) {
   const val = esc(a.article_source ?? '');
-  return `<input class="source-input" type="url" data-field="article_source" data-id="${a.id}" value="${val}" placeholder="https://...">`;
+  const vis = a.article_source ? '' : 'visibility:hidden';
+  return `<span class="source-cell-wrap">
+    <a class="source-open" href="${val}" target="_blank" rel="noopener" tabindex="-1" style="${vis}" title="Ouvrir la source">🔗</a>
+    <input class="source-input" type="url" data-field="article_source" data-id="${a.id}" value="${val}" placeholder="https://...">
+  </span>`;
 }
 function setupSourceCells(container) {
   container.querySelectorAll('.source-input').forEach(inp => {
     inp.addEventListener('focus', () => { inp.dataset.before = inp.value; });
-    inp.addEventListener('blur', () => patchArticle(Number(inp.dataset.id), 'article_source', inp.value.trim(), inp.dataset.before));
+    inp.addEventListener('blur', () => {
+      const url = inp.value.trim();
+      patchArticle(Number(inp.dataset.id), 'article_source', url, inp.dataset.before);
+      const lnk = inp.closest('.source-cell-wrap')?.querySelector('.source-open');
+      if (lnk) { lnk.href = url || '#'; lnk.style.visibility = url ? '' : 'hidden'; }
+    });
     inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
   });
 }
