@@ -21,6 +21,9 @@ let extraIssueId = null;
 let dashSearch = '', dashFilterMonth = '', dashFilterRedacteur = '', dashFilterStatut = '';
 let billingModalSetup = false;
 let billingData = [];
+let articlesCache = {};
+let undoStack = [];
+let toastTimer = null;
 
 const STATUS_OPTIONS = ['A faire','Not started','Stand by','In progress','Fact-check','ReWork','Sujet à revoir','Trop court','Problème','Done but not sure','Done'];
 const STATUS_CLASS = {
@@ -567,23 +570,32 @@ function renderArticlesTable(articles) {
     };
   });
 
+  articles.forEach(a => { articlesCache[a.id] = {...a}; });
+
   tbody.querySelectorAll('.editable').forEach(el => {
-    el.addEventListener('blur', () => patchArticle(Number(el.dataset.id), el.dataset.field, el.textContent.trim()));
+    el.addEventListener('focus', () => { el.dataset.before = el.textContent.trim(); });
+    el.addEventListener('blur', () => patchArticle(Number(el.dataset.id), el.dataset.field, el.textContent.trim(), el.dataset.before));
     el.addEventListener('keydown', e => { if (e.key==='Enter'&&!e.shiftKey) { e.preventDefault(); el.blur(); } });
   });
   tbody.querySelectorAll('.cell-select').forEach(sel => {
-    sel.addEventListener('change', () => patchArticle(Number(sel.dataset.id), sel.dataset.field, sel.value));
+    sel.addEventListener('focus', () => { sel.dataset.before = sel.value; });
+    sel.addEventListener('change', () => patchArticle(Number(sel.dataset.id), sel.dataset.field, sel.value, sel.dataset.before));
   });
   tbody.querySelectorAll('.status-select').forEach(sel => {
+    sel.addEventListener('focus', () => { sel.dataset.before = sel.value; });
     sel.addEventListener('change', () => {
       sel.className = 'status-select ' + (STATUS_CLASS[sel.value] || 's-todo');
-      patchArticle(Number(sel.dataset.id), 'status', sel.value);
+      patchArticle(Number(sel.dataset.id), 'status', sel.value, sel.dataset.before);
     });
   });
   tbody.querySelectorAll('[data-del]').forEach(btn => {
     btn.addEventListener('click', async () => {
+      const id = Number(btn.dataset.del);
       if (!confirm('Supprimer cet article ?')) return;
-      await fetch(`/api/articles/${btn.dataset.del}`, { method:'DELETE' });
+      const article = articlesCache[id];
+      await fetch(`/api/articles/${id}`, {method:'DELETE'});
+      if (article) pushUndo({ type:'delete', article });
+      else showToast('Article supprimé');
       loadArticles();
     });
   });
@@ -605,30 +617,77 @@ function renderArticlesTable(articles) {
 }
 
 function renderSourceCell(a) {
-  if (a.article_source) return `<a class="source-link" href="${esc(a.article_source)}" target="_blank" rel="noopener">🔗 Source</a>`;
-  return `<span class="source-empty" data-edit-source="${a.id}">+ source</span>`;
+  const val = esc(a.article_source ?? '');
+  return `<input class="source-input" type="url" data-field="article_source" data-id="${a.id}" value="${val}" placeholder="https://...">`;
 }
 function setupSourceCells(container) {
-  container.querySelectorAll('.source-empty[data-edit-source]').forEach(el => {
-    el.addEventListener('click', () => {
-      const url = prompt('URL de la source :');
-      if (url?.trim()) { patchArticle(Number(el.dataset.editSource), 'article_source', url.trim()); loadArticles(); }
-    });
-  });
-  container.querySelectorAll('.source-link').forEach(lnk => {
-    lnk.addEventListener('dblclick', e => {
-      e.preventDefault();
-      const id = lnk.closest('tr').dataset.id;
-      const url = prompt('Modifier la source :', lnk.href);
-      if (url !== null) { patchArticle(Number(id), 'article_source', url.trim()); loadArticles(); }
-    });
+  container.querySelectorAll('.source-input').forEach(inp => {
+    inp.addEventListener('focus', () => { inp.dataset.before = inp.value; });
+    inp.addEventListener('blur', () => patchArticle(Number(inp.dataset.id), 'article_source', inp.value.trim(), inp.dataset.before));
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); });
   });
 }
-async function patchArticle(id, field, value) {
+// ─── UNDO / TOAST ────────────────────────────────────────
+function showToast(msg, withUndo = false) {
+  const toast = document.getElementById('undo-toast');
+  document.getElementById('undo-msg').textContent = msg;
+  document.getElementById('btn-undo').style.display = withUndo ? '' : 'none';
+  toast.style.display = 'flex';
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toast.style.display = 'none'; }, 8000);
+}
+function pushUndo(action) {
+  undoStack.push(action);
+  if (undoStack.length > 20) undoStack.shift();
+  const labels = {
+    'edit':        'Modification enregistrée',
+    'delete':      'Article supprimé',
+    'bulk-delete': `${action.articles?.length} article(s) supprimé(s)`,
+    'create':      `${action.ids?.length} article(s) créé(s)`,
+    'bulk-edit':   `${action.ids?.length} article(s) modifié(s)`,
+  };
+  showToast(labels[action.type] || 'Action effectuée', true);
+}
+async function doUndo() {
+  const action = undoStack.pop();
+  if (!action) return;
+  document.getElementById('undo-toast').style.display = 'none';
+  if (action.type === 'edit') {
+    await fetch(`/api/articles/${action.id}`, {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ [action.field]: action.old })
+    });
+  } else if (action.type === 'delete') {
+    await fetch('/api/articles', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(action.article)
+    });
+  } else if (action.type === 'bulk-delete') {
+    await Promise.all(action.articles.map(a =>
+      fetch('/api/articles', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(a) })
+    ));
+  } else if (action.type === 'create') {
+    await Promise.all(action.ids.map(id => fetch(`/api/articles/${id}`, {method:'DELETE'})));
+  } else if (action.type === 'bulk-edit') {
+    await Promise.all(action.ids.map(id =>
+      fetch(`/api/articles/${id}`, {
+        method:'PUT', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ [action.field]: action.oldValues[id] ?? null })
+      })
+    ));
+  }
+  loadArticles();
+  showToast('Action annulée', undoStack.length > 0);
+}
+
+async function patchArticle(id, field, value, oldValue) {
   await fetch(`/api/articles/${id}`, {
     method:'PUT', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({ [field]: value || null })
   });
+  if (oldValue !== undefined && oldValue !== value) {
+    pushUndo({ type:'edit', id, field, old: oldValue || null });
+  }
 }
 async function addArticle() {
   if (!currentMag) { alert('Sélectionne un magazine et un numéro.'); return; }
@@ -663,24 +722,27 @@ function setupBulkToolbar() {
     const field = fieldSel.value;
     const valEl = document.getElementById('bulk-value');
     if (!field || !valEl || !selectedIds.size) return;
+    const ids = [...selectedIds];
+    const oldValues = {};
+    ids.forEach(id => { if (articlesCache[id]) oldValues[id] = articlesCache[id][field] ?? null; });
     await fetch('/api/articles/bulk', {
       method:'PATCH', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ ids:[...selectedIds], updates:{ [field]: valEl.value } })
+      body: JSON.stringify({ ids, updates:{ [field]: valEl.value } })
     });
+    pushUndo({ type:'bulk-edit', ids, field, oldValues });
     loadArticles();
   });
-  document.getElementById('btn-bulk-duplicate').addEventListener('click', async () => {
+  document.getElementById('btn-bulk-duplicate').addEventListener('click', () => {
     if (!selectedIds.size) return;
-    await fetch('/api/articles/duplicate', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ ids:[...selectedIds] })
-    });
-    loadArticles();
+    openBulkDupModal();
   });
   document.getElementById('btn-bulk-delete').addEventListener('click', async () => {
     if (!selectedIds.size) return;
     if (!confirm(`Supprimer ${selectedIds.size} article(s) ?`)) return;
+    const articles = [...selectedIds].map(id => articlesCache[id]).filter(Boolean);
     await Promise.all([...selectedIds].map(id => fetch(`/api/articles/${id}`,{method:'DELETE'})));
+    if (articles.length) pushUndo({ type:'bulk-delete', articles });
+    else showToast(`${selectedIds.size} article(s) supprimé(s)`);
     loadArticles();
   });
   document.getElementById('btn-bulk-clear').addEventListener('click', () => {
@@ -1503,6 +1565,24 @@ function openCopyModal(mag, num) {
   document.getElementById('modal-copy').style.display = 'flex';
 }
 
+// ─── BULK DUP MODAL ──────────────────────────────────────
+function openBulkDupModal() {
+  document.getElementById('bdup-count').textContent = selectedIds.size;
+  const mags = [...new Set(allIssues.map(i => i.magazine))].sort();
+  const magSel = document.getElementById('bdup-dest-mag');
+  magSel.innerHTML = mags.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+  if (currentMag && mags.includes(currentMag)) magSel.value = currentMag;
+  updateBdupNums();
+  document.getElementById('modal-bulk-dup').style.display = 'flex';
+}
+function updateBdupNums() {
+  const mag = document.getElementById('bdup-dest-mag').value;
+  const nums = allIssues.filter(i => i.magazine === mag).map(i => i.numero);
+  const numSel = document.getElementById('bdup-dest-num');
+  numSel.innerHTML = nums.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  if (currentNum && nums.includes(currentNum)) numSel.value = currentNum;
+}
+
 // ─── ISSUE EXTRA MODAL ───────────────────────────────────
 function openExtraModal(id, note, lien) {
   extraIssueId = id;
@@ -1552,6 +1632,41 @@ function setupModals() {
     if (r.ok) alert(`${result.copied} article(s) copié(s) vers N°${destNum}.`);
     await refreshIssues();
     if (document.getElementById('tab-numeros').classList.contains('active')) renderIssuesTable();
+  });
+
+  // Bulk dup modal
+  document.getElementById('bdup-dest-mag').addEventListener('change', updateBdupNums);
+  document.getElementById('btn-bdup-cancel').addEventListener('click', () => { document.getElementById('modal-bulk-dup').style.display='none'; });
+  document.getElementById('modal-bulk-dup').addEventListener('click', e => { if (e.target===e.currentTarget) e.currentTarget.style.display='none'; });
+  document.getElementById('btn-bdup-confirm').addEventListener('click', async () => {
+    const destMag = document.getElementById('bdup-dest-mag').value;
+    const destNum = document.getElementById('bdup-dest-num').value;
+    const fields = [];
+    if (document.getElementById('bdup-titre').checked)        fields.push('titre');
+    if (document.getElementById('bdup-pages').checked)        { fields.push('page_debut','page_fin'); }
+    if (document.getElementById('bdup-type').checked)         fields.push('type_contenu');
+    if (document.getElementById('bdup-rubrique').checked)     fields.push('rubrique');
+    if (document.getElementById('bdup-resume').checked)       fields.push('resume');
+    if (document.getElementById('bdup-source').checked)       fields.push('article_source');
+    if (document.getElementById('bdup-commentaires').checked) fields.push('commentaires');
+    if (document.getElementById('bdup-auteur').checked)       fields.push('auteur');
+    if (document.getElementById('bdup-deadline').checked)     fields.push('deadline');
+    if (document.getElementById('bdup-signes').checked)       fields.push('signes');
+    const r = await fetch('/api/articles/duplicate', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ ids:[...selectedIds], fields, dest_magazine:destMag, dest_numero:destNum })
+    });
+    const result = await r.json();
+    document.getElementById('modal-bulk-dup').style.display='none';
+    if (r.ok && result.newIds?.length) pushUndo({ type:'create', ids: result.newIds });
+    else if (r.ok) showToast(`${result.duplicated} article(s) dupliqué(s)`);
+    loadArticles();
+  });
+
+  document.getElementById('btn-undo').addEventListener('click', doUndo);
+  document.getElementById('btn-undo-dismiss').addEventListener('click', () => {
+    document.getElementById('undo-toast').style.display = 'none';
+    clearTimeout(toastTimer);
   });
 
   document.getElementById('btn-extra-cancel').addEventListener('click', () => { document.getElementById('modal-issue-extra').style.display='none'; });

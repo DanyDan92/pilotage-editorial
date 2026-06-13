@@ -108,7 +108,9 @@ app.get('/logout', (req, res) => {
 });
 
 app.use(sessionAuth);
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res) => res.set('Cache-Control', 'no-cache'),
+}));
 
 const dbDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
@@ -332,19 +334,32 @@ app.put('/api/articles/:id', (req, res) => {
 });
 
 app.post('/api/articles/duplicate', (req, res) => {
-  const { ids } = req.body;
+  const { ids, fields, dest_magazine, dest_numero } = req.body;
   if (!ids?.length) return res.status(400).json({ error: 'ids requis' });
+  const COPYABLE = ['titre','page_debut','page_fin','type_contenu','rubrique','resume',
+    'article_source','commentaires','auteur','deadline','signes'];
+  const copyFields = Array.isArray(fields) ? fields.filter(f => COPYABLE.includes(f)) : COPYABLE;
   const get = db.prepare('SELECT * FROM articles WHERE id=?');
-  const ins = db.prepare(`INSERT INTO articles (magazine, numero, titre, type_contenu, rubrique,
-    resume, article_source, status) VALUES (?,?,?,?,?,?,?,?)`);
+  const newIds = [];
   let count = 0;
   for (const id of ids) {
     const a = get.get(id);
     if (!a) continue;
-    ins.run(a.magazine, a.numero, a.titre, a.type_contenu, a.rubrique, a.resume, a.article_source, 'A faire');
+    const row = {
+      magazine: dest_magazine || a.magazine,
+      numero: dest_numero || a.numero,
+      status: 'A faire',
+    };
+    for (const f of copyFields) {
+      if (a[f] !== null && a[f] !== undefined) row[f] = a[f];
+    }
+    if (!row.titre) row.titre = 'Nouvel article';
+    const cols = Object.keys(row);
+    const info = db.prepare(`INSERT INTO articles (${cols.join(',')}) VALUES (${cols.map(()=>'?').join(',')})`).run(...Object.values(row));
+    newIds.push(info.lastInsertRowid);
     count++;
   }
-  res.json({ ok: true, duplicated: count });
+  res.json({ ok: true, duplicated: count, newIds });
 });
 
 app.patch('/api/articles/bulk', (req, res) => {
