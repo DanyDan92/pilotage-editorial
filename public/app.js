@@ -519,8 +519,7 @@ async function loadArticles() {
     );
   }
   if (artFilterRedacteur) {
-    const validKeys = new Set(allIssues.filter(i => i.redacteur === artFilterRedacteur).map(i => `${i.magazine}|${i.numero}`));
-    articles = articles.filter(a => validKeys.has(`${a.magazine}|${a.numero}`));
+    articles = articles.filter(a => a.redacteur === artFilterRedacteur);
   }
   if (artSortField) {
     articles.sort((a, b) => {
@@ -554,6 +553,10 @@ function renderArticlesTable(articles) {
       <td><select class="cell-select" data-field="type_contenu" data-id="${a.id}">${typeSel}</select></td>
       <td><select class="cell-select" data-field="rubrique"     data-id="${a.id}">${rubSel}</select></td>
       <td><select class="status-select ${staClass}" data-field="status" data-id="${a.id}">${staOpts}</select></td>
+      <td><select class="cell-select redac-select" data-field="redacteur" data-id="${a.id}">
+        <option value="">—</option>
+        ${Object.keys(REDAC_COLOR).map(r => `<option${r===a.redacteur?' selected':''}>${r}</option>`).join('')}
+      </select></td>
       <td class="td-wrap"><span class="editable editable-wrap" contenteditable="true" data-field="resume"       data-id="${a.id}">${esc(a.resume??'')}</span></td>
       <td class="td-wrap"><span class="editable editable-wrap" contenteditable="true" data-field="commentaires" data-id="${a.id}">${esc(a.commentaires??'')}</span></td>
       <td class="col-source-cell">${renderSourceCell(a)}</td>
@@ -723,6 +726,8 @@ function setupBulkToolbar() {
     } else if (field==='magazine') {
       const mags = [...new Set(allIssues.map(i=>i.magazine))].sort();
       wrap.innerHTML = `<select id="bulk-value"><option value=""></option>${mags.map(m=>`<option>${esc(m)}</option>`).join('')}</select>`;
+    } else if (field==='redacteur') {
+      wrap.innerHTML = `<select id="bulk-value"><option value="">— Aucun —</option>${Object.keys(REDAC_COLOR).map(r=>`<option>${r}</option>`).join('')}</select>`;
     } else {
       wrap.innerHTML = `<input id="bulk-value" type="text" style="width:140px" placeholder="Nouvelle valeur">`;
     }

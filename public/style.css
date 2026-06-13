@@ -119,6 +119,7 @@ col.col-titre        { width: 195px; }
 col.col-type         { width: 90px; }
 col.col-rubrique     { width: 140px; }
 col.col-statut       { width: 128px; }
+col.col-redacteur    { width: 95px; }
 col.col-resume       { width: 155px; }
 col.col-commentaires { width: 115px; }
 col.col-source       { width: 160px; }

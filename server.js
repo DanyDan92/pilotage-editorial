@@ -162,6 +162,10 @@ for (const [col, def] of Object.entries(issueNewCols)) {
   if (!issueCols.includes(col)) db.exec(`ALTER TABLE issues ADD COLUMN ${col} ${def}`);
 }
 
+// ─── MIGRATIONS articles table ───────────────────────────────
+const artCols = db.prepare('PRAGMA table_info(articles)').all().map(c => c.name);
+if (!artCols.includes('redacteur')) db.exec(`ALTER TABLE articles ADD COLUMN redacteur TEXT`);
+
 // ─── SEEDS ───────────────────────────────────────────────────
 const ISSUES_SEED = [
   { magazine: 'France hebdomadaire',        numero: '20',      deadline: '2026-06-10' },
@@ -315,7 +319,7 @@ app.get('/api/numeros', (req, res) => {
 
 app.post('/api/articles', (req, res) => {
   const cols = ['magazine','numero','titre','type_contenu','rubrique','page_debut',
-    'page_fin','status','auteur','resume','lien_article','article_source',
+    'page_fin','status','auteur','redacteur','resume','lien_article','article_source',
     'validation','commentaires','signes','deadline'];
   const vals = cols.map(c => req.body[c] ?? null);
   const info = db.prepare(`INSERT INTO articles (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`).run(...vals);
@@ -324,7 +328,7 @@ app.post('/api/articles', (req, res) => {
 
 app.put('/api/articles/:id', (req, res) => {
   const allowed = ['magazine','numero','titre','type_contenu','rubrique','page_debut',
-    'page_fin','status','auteur','resume','lien_article','article_source',
+    'page_fin','status','auteur','redacteur','resume','lien_article','article_source',
     'validation','commentaires','signes','deadline'];
   const updates = Object.entries(req.body).filter(([k]) => allowed.includes(k));
   if (!updates.length) return res.status(400).json({ error: 'Aucun champ valide' });
@@ -337,7 +341,7 @@ app.post('/api/articles/duplicate', (req, res) => {
   const { ids, fields, dest_magazine, dest_numero } = req.body;
   if (!ids?.length) return res.status(400).json({ error: 'ids requis' });
   const COPYABLE = ['titre','page_debut','page_fin','type_contenu','rubrique','resume',
-    'article_source','commentaires','auteur','deadline','signes'];
+    'article_source','commentaires','auteur','redacteur','deadline','signes'];
   const copyFields = Array.isArray(fields) ? fields.filter(f => COPYABLE.includes(f)) : COPYABLE;
   const get = db.prepare('SELECT * FROM articles WHERE id=?');
   const newIds = [];
@@ -366,7 +370,7 @@ app.patch('/api/articles/bulk', (req, res) => {
   const { ids, updates } = req.body;
   if (!ids?.length || !updates) return res.status(400).json({ error: 'ids et updates requis' });
   const allowed = ['magazine','numero','titre','type_contenu','rubrique','page_debut',
-    'page_fin','status','auteur','resume','validation','commentaires','deadline'];
+    'page_fin','status','auteur','redacteur','resume','validation','commentaires','deadline'];
   const valid = Object.entries(updates).filter(([k]) => allowed.includes(k));
   if (!valid.length) return res.status(400).json({ error: 'Aucun champ valide' });
   db.prepare(`UPDATE articles SET ${valid.map(([k]) => `${k}=?`).join(',')} WHERE id IN (${ids.map(() => '?').join(',')})`)
